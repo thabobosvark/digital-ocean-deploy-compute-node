@@ -77,62 +77,56 @@ jobs:
         echo "Com1 IP: $(cat ../ansible/com1_ip.txt)"
         echo "Com2 IP: $(cat ../ansible/com2_ip.txt)"
 
-    - name: Configure com2 node manually via SSH
+    - name: Create configuration script for com2
+      run: |
+        cat > configure_com2.sh << 'SCRIPT'
+#!/bin/bash
+set -e
+
+CO2_IP=$1
+
+echo "Configuring com2 node at $CO2_IP"
+
+# Create clusteradmin user
+ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key root@$CO2_IP "useradd -m -s /bin/bash clusteradmin"
+ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key root@$CO2_IP "echo 'clusteradmin ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers.d/clusteradmin"
+ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key root@$CO2_IP "chmod 440 /etc/sudoers.d/clusteradmin"
+
+# Create .ssh directory and add authorized key
+ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key root@$CO2_IP "mkdir -p /home/clusteradmin/.ssh"
+ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key root@$CO2_IP "echo 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBWXU12cxnyWt+hhOJJfrk+YwsEYFTt5uNFqjUzsUKy2 clusteradmin@head' >> /home/clusteradmin/.ssh/authorized_keys"
+ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key root@$CO2_IP "chmod 700 /home/clusteradmin/.ssh"
+ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key root@$CO2_IP "chmod 600 /home/clusteradmin/.ssh/authorized_keys"
+ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key root@$CO2_IP "chown -R clusteradmin:clusteradmin /home/clusteradmin/.ssh"
+
+# Install NFS client
+ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key root@$CO2_IP "dnf install -y nfs-utils"
+
+# Create mount point
+ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key root@$CO2_IP "mkdir -p /home/clusteradmin/shared"
+ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key root@$CO2_IP "chown clusteradmin:clusteradmin /home/clusteradmin/shared"
+
+# Add to fstab for permanent mount
+ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key root@$CO2_IP "echo '157.245.35.46:/home/clusteradmin/shared /home/clusteradmin/shared nfs defaults 0 0' >> /etc/fstab"
+
+echo "Configuration completed for com2 node"
+SCRIPT
+
+        chmod +x configure_com2.sh
+
+    - name: Configure com2 node using script
       run: |
         CO2_IP=$(cat ansible/com2_ip.txt)
-        echo "Configuring com2 node at $CO2_IP"
-        
-        # SSH into com2 and run configuration commands
-        ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key root@$CO2_IP << 'SSH_COMMANDS'
-          # Create clusteradmin user
-          useradd -m -s /bin/bash clusteradmin
-          echo "clusteradmin ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/clusteradmin
-          chmod 440 /etc/sudoers.d/clusteradmin
-          
-          # Create .ssh directory and add authorized key
-          mkdir -p /home/clusteradmin/.ssh
-          echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBWXU12cxnyWt+hhOJJfrk+YwsEYFTt5uNFqjUzsUKy2 clusteradmin@head" >> /home/clusteradmin/.ssh/authorized_keys
-          chmod 700 /home/clusteradmin/.ssh
-          chmod 600 /home/clusteradmin/.ssh/authorized_keys
-          chown -R clusteradmin:clusteradmin /home/clusteradmin/.ssh
-          
-          # Install NFS client
-          dnf install -y nfs-utils
-          
-          # Create mount point
-          mkdir -p /home/clusteradmin/shared
-          chown clusteradmin:clusteradmin /home/clusteradmin/shared
-          
-          # Add to fstab for permanent mount (using head node IP)
-          echo "157.245.35.46:/home/clusteradmin/shared /home/clusteradmin/shared nfs defaults 0 0" >> /etc/fstab
-          
-          # Mount immediately
-          mount /home/clusteradmin/shared
-          
-          # Verify setup
-          echo "=== User created ==="
-          id clusteradmin
-          echo "=== SSH key added ==="
-          cat /home/clusteradmin/.ssh/authorized_keys
-          echo "=== NFS mount ==="
-          df -h | grep shared || echo "NFS not mounted yet, may need to be mounted on head node first"
-SSH_COMMANDS
+        ./configure_com2.sh $CO2_IP
 
     - name: Verify com2 configuration
       run: |
         CO2_IP=$(cat ansible/com2_ip.txt)
         echo "Verifying configuration on com2 node at $CO2_IP"
         
-        ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key root@$CO2_IP << 'VERIFY_COMMANDS'
-          echo "=== Users ==="
-          getent passwd clusteradmin
-          echo "=== SSH directory ==="
-          ls -la /home/clusteradmin/.ssh/
-          echo "=== NFS mount ==="
-          mount | grep shared || echo "NFS not mounted"
-          echo "=== Sudo access ==="
-          sudo -U clusteradmin -l
-VERIFY_COMMANDS
+        ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key root@$CO2_IP "getent passwd clusteradmin && echo '=== User created successfully ==='"
+        ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key root@$CO2_IP "ls -la /home/clusteradmin/.ssh/ && echo '=== SSH directory created ==='"
+        ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key root@$CO2_IP "sudo -U clusteradmin -l && echo '=== Sudo access verified ==='"
 
     - name: Display completion message
       run: |
@@ -143,7 +137,7 @@ VERIFY_COMMANDS
         echo "com2 node: $CO2_IP"
         echo "User: clusteradmin"
         echo "SSH Key: Added from head node"
-        echo "NFS: Configured (may need manual mount on head)"
+        echo "NFS: Configured (mount with: mount /home/clusteradmin/shared)"
         echo ""
         echo "To connect: ssh clusteradmin@$CO2_IP"
         echo "=========================================="
