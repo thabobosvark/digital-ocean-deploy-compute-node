@@ -1,10 +1,14 @@
 ---
-- name: Initial setup for com2 - create clusteradmin user
+- name: Initial setup for com2
   hosts: compute_new
   gather_facts: yes
   become: yes
 
   tasks:
+    - name: Wait for system to be fully ready
+      wait_for_connection:
+        timeout: 300
+
     - name: Create clusteradmin user
       user:
         name: clusteradmin
@@ -12,6 +16,7 @@
         groups: wheel
         append: yes
         create_home: yes
+        shell: /bin/bash
 
     - name: Set password for clusteradmin
       user:
@@ -32,11 +37,13 @@
         group: clusteradmin
         mode: 0700
 
-    - name: Copy SSH public key to clusteradmin using shell
-      shell: |
-        cat /tmp/ssh_key.pub >> /home/clusteradmin/.ssh/authorized_keys
-        chown clusteradmin:clusteradmin /home/clusteradmin/.ssh/authorized_keys
-        chmod 600 /home/clusteradmin/.ssh/authorized_keys
+    - name: Setup SSH key for clusteradmin
+      copy:
+        content: "{{ lookup('file', '/tmp/ssh_key.pub') }}"
+        dest: /home/clusteradmin/.ssh/authorized_keys
+        owner: clusteradmin
+        group: clusteradmin
+        mode: 0600
 
     - name: Configure /etc/hosts for cluster
       blockinfile:
@@ -51,16 +58,8 @@
       hostname:
         name: com2
 
-- name: Verify clusteradmin setup on com2
-  hosts: localhost
-  gather_facts: no
-
-  tasks:
-    - name: Test SSH as clusteradmin to com2
-      command: ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key clusteradmin@{{ groups['compute_new'][0] }} "echo 'com2 accessible as clusteradmin'"
-      register: test_result
-      changed_when: false
-
-    - name: Display test result
-      debug:
-        msg: "{{ test_result.stdout }}"
+    - name: Ensure SSH service is running
+      systemd:
+        name: sshd
+        state: started
+        enabled: yes
