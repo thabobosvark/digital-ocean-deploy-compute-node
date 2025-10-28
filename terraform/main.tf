@@ -35,8 +35,6 @@ resource "digitalocean_droplet" "com2" {
   size     = var.com2_size
   ssh_keys = [digitalocean_ssh_key.cluster_key.fingerprint]
   tags     = var.tags
-
-  # Remove remote-exec provisioner to avoid hanging
 }
 
 # Generate Ansible inventory
