@@ -1,0 +1,45 @@
+name: Deploy with Static Inventory
+
+on:
+  workflow_dispatch:
+
+env:
+  TERRAFORM_VERSION: 1.5.7
+
+jobs:
+  deploy:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v2
+      with:
+        terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+    - name: Install Ansible
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ansible
+
+    - name: Generate SSH key
+      run: |
+        mkdir -p /tmp/.ssh
+        ssh-keygen -t rsa -b 4096 -f /tmp/ssh_key -N "" -C "github-actions"
+        chmod 600 /tmp/ssh_key
+
+    - name: Use static inventory
+      run: |
+        echo "Using static inventory with known IP addresses"
+        cp ansible/inventory_static.ini ansible/inventory.ini
+
+    - name: Test with static inventory
+      run: |
+        cd ansible
+        echo "=== Testing inventory ==="
+        ansible-inventory -i inventory.ini --list
+        
+        echo "=== Testing playbook-com2.yml ==="
+        ansible-playbook -i inventory.ini playbook-com2.yml --limit head,com1,com2
