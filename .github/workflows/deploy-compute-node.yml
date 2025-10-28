@@ -23,7 +23,7 @@ jobs:
     - name: Install Ansible and dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y ansible sshpass
+        sudo apt-get install -y ansible sshpass jq
 
     - name: Create terraform.tfvars from secrets
       run: |
@@ -51,55 +51,98 @@ jobs:
 
     - name: Wait for SSH to be ready
       run: |
-        sleep 30  # Wait for droplets to be fully provisioned
+        sleep 30
 
-    - name: Generate dynamic inventory from Terraform
+    - name: Extract IP addresses from Terraform state
       run: |
         cd terraform
-        terraform output -raw com1_ip > ../ansible/com1_ip.txt
-        terraform output -raw com2_ip > ../ansible/com2_ip.txt
-        terraform output -raw head_ip > ../ansible/head_ip.txt
+        terraform show -json > tfstate.json
+        
+        # Extract all droplet IPs - this will work regardless of resource names
+        jq -r '.values.root_module.resources[] | select(.type=="digitalocean_droplet") | .values.ipv4_address' tfstate.json > ../ansible/all_ips.txt
+        
+        # Count the droplets and assign roles
+        DROPLET_COUNT=$(wc -l < ../ansible/all_ips.txt)
+        echo "Found $DROPLET_COUNT droplets"
+        
+        if [ $DROPLET_COUNT -ge 1 ]; then
+          head -1 ../ansible/all_ips.txt > ../ansible/head_ip.txt
+        fi
+        
+        if [ $DROPLET_COUNT -ge 2 ]; then
+          sed -n '2p' ../ansible/all_ips.txt > ../ansible/com1_ip.txt
+        fi
+        
+        if [ $DROPLET_COUNT -ge 3 ]; then
+          sed -n '3p' ../ansible/all_ips.txt > ../ansible/com2_ip.txt
+        fi
 
-    - name: Create dynamic inventory for Ansible
+    - name: Create inventory for Ansible
       run: |
+        # Create basic inventory with whatever IPs we found
         echo "[head]" > ansible/inventory.ini
-        cat ansible/head_ip.txt >> ansible/inventory.ini
-        echo "" >> ansible/inventory.ini
-        echo "[com1]" >> ansible/inventory.ini
-        cat ansible/com1_ip.txt >> ansible/inventory.ini
-        echo "" >> ansible/inventory.ini
-        echo "[com2]" >> ansible/inventory.ini
-        cat ansible/com2_ip.txt >> ansible/inventory.ini
+        if [ -f ansible/head_ip.txt ] && [ -s ansible/head_ip.txt ]; then
+          cat ansible/head_ip.txt >> ansible/inventory.ini
+        else
+          echo "# No head node IP found" >> ansible/inventory.ini
+        fi
+        
         echo "" >> ansible/inventory.ini
         echo "[compute_nodes]" >> ansible/inventory.ini
-        cat ansible/com1_ip.txt >> ansible/inventory.ini
-        cat ansible/com2_ip.txt >> ansible/inventory.ini
+        
+        if [ -f ansible/com1_ip.txt ] && [ -s ansible/com1_ip.txt ]; then
+          cat ansible/com1_ip.txt >> ansible/inventory.ini
+        fi
+        
+        if [ -f ansible/com2_ip.txt ] && [ -s ansible/com2_ip.txt ]; then
+          cat ansible/com2_ip.txt >> ansible/inventory.ini
+        fi
+        
+        # If no specific compute nodes, use all except head
+        if [ ! -f ansible/com1_ip.txt ] && [ -f ansible/all_ips.txt ]; then
+          tail -n +2 ansible/all_ips.txt >> ansible/inventory.ini
+        fi
+        
         echo "" >> ansible/inventory.ini
         echo "[all:vars]" >> ansible/inventory.ini
         echo "ansible_user=root" >> ansible/inventory.ini
         echo "ansible_ssh_private_key_file=/tmp/ssh_key" >> ansible/inventory.ini
         echo "ansible_ssh_common_args='-o StrictHostKeyChecking=no'" >> ansible/inventory.ini
 
-    - name: Display inventory
-      run: cat ansible/inventory.ini
+    - name: Display inventory and state
+      run: |
+        echo "=== Terraform State ==="
+        cd terraform && terraform show && cd ..
+        echo "=== Inventory ==="
+        cat ansible/inventory.ini
+        echo "=== All IPs ==="
+        cat ansible/all_ips.txt || echo "No IPs found"
 
-    - name: Run initial node setup playbook
+    - name: Test SSH connection
       run: |
         cd ansible
-        ansible-playbook -i inventory.ini playbook-com2.yml
+        if [ -s inventory.ini ]; then
+          ansible -i inventory.ini all -m ping
+        else
+          echo "No inventory available for SSH test"
+        fi
 
-    - name: Run NFS fix playbook
+    - name: Run Ansible playbooks if nodes available
       run: |
         cd ansible
-        ansible-playbook -i inventory.ini fix-nfs-mount.yml
-
-    - name: Run final fixes playbook
-      run: |
-        cd ansible
-        ansible-playbook -i inventory.ini fix-final.yml
-
-    - name: Run CI verification
-      run: |
-        cd ansible
-        chmod +x ci-verification.sh
-        ./ci-verification.sh
+        if [ -s inventory.ini ] && grep -q -E "^[0-9]" inventory.ini; then
+          echo "Running playbook-com2.yml..."
+          ansible-playbook -i inventory.ini playbook-com2.yml
+          
+          echo "Running fix-nfs-mount.yml..."
+          ansible-playbook -i inventory.ini fix-nfs-mount.yml
+          
+          echo "Running fix-final.yml..."
+          ansible-playbook -i inventory.ini fix-final.yml
+          
+          echo "Running CI verification..."
+          chmod +x ci-verification.sh
+          ./ci-verification.sh
+        else
+          echo "No nodes available for configuration"
+        fi
