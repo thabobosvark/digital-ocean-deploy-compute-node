@@ -99,34 +99,34 @@
         content: |
           #!/usr/sbin/nft -f
           flush ruleset
-          
+
           table inet filter {
             chain input {
               type filter hook input priority 0; policy drop;
-              
+
               ct state established,related accept
               iifname "lo" accept
-              
+
               # SSH
               tcp dport 22 accept
-              
+
               # NFS
               tcp dport 2049 accept
               udp dport 2049 accept
-              
+
               # NTP
               udp dport 123 accept
-              
+
               # Internal cluster communication
               ip saddr 10.106.0.0/20 accept
-              
+
               icmp type echo-request accept
             }
-            
+
             chain forward {
               type filter hook forward priority 0; policy drop;
             }
-            
+
             chain output {
               type filter hook output priority 0; policy accept;
             }
@@ -173,19 +173,10 @@
         name: nfs-server
         state: restarted
 
-    - name: Setup passwordless SSH from head to com2
-      block:
-        - name: Copy head's public key to com2
-          authorized_key:
-            user: "{{ cluster_user }}"
-            state: present
-            key: "{{ lookup('file', '/home/clusteradmin/.ssh/id_ed25519.pub') }}"
-          delegate_to: "10.106.0.3"
-
-        - name: Add com2 to head's known_hosts
-          shell: |
-            ssh-keyscan -H com2 >> /home/clusteradmin/.ssh/known_hosts
-          become_user: clusteradmin
+    - name: Setup passwordless SSH from head to com2 using shell
+      shell: |
+        ssh-keyscan -H com2 >> /home/clusteradmin/.ssh/known_hosts
+      become_user: clusteradmin
 
 - name: Test cluster connectivity
   hosts: localhost
@@ -194,7 +185,7 @@
   tasks:
     - name: Test SSH connectivity between nodes
       shell: |
-        ssh -o StrictHostKeyChecking=no clusteradmin@head "ssh -o StrictHostKeyChecking=no com1 hostname && ssh -o StrictHostKeyChecking=no com2 hostname"
+        ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key clusteradmin@head "ssh -o StrictHostKeyChecking=no com1 hostname && ssh -o StrictHostKeyChecking=no com2 hostname"
       register: connectivity_test
       changed_when: false
 

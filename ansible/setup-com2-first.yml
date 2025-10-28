@@ -32,11 +32,11 @@
         group: clusteradmin
         mode: 0700
 
-    - name: Copy SSH public key to clusteradmin
-      authorized_key:
-        user: clusteradmin
-        state: present
-        key: "{{ lookup('file', '/home/clusteradmin/.ssh/id_ed25519.pub') }}"
+    - name: Copy SSH public key to clusteradmin using shell
+      shell: |
+        cat /tmp/ssh_key.pub >> /home/clusteradmin/.ssh/authorized_keys
+        chown clusteradmin:clusteradmin /home/clusteradmin/.ssh/authorized_keys
+        chmod 600 /home/clusteradmin/.ssh/authorized_keys
 
     - name: Configure /etc/hosts for cluster
       blockinfile:
@@ -44,8 +44,12 @@
         block: |
           10.106.0.5 head
           10.106.0.4 com1
-          10.106.0.3 com2
+          {{ ansible_default_ipv4.address }} com2
         marker: "# {mark} ANSIBLE MANAGED BLOCK - CLUSTER NODES"
+
+    - name: Set hostname to com2
+      hostname:
+        name: com2
 
 - name: Verify clusteradmin setup on com2
   hosts: localhost
@@ -53,7 +57,7 @@
 
   tasks:
     - name: Test SSH as clusteradmin to com2
-      command: ssh -o StrictHostKeyChecking=no clusteradmin@10.106.0.3 "echo 'com2 accessible as clusteradmin'"
+      command: ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key clusteradmin@{{ groups['compute_new'][0] }} "echo 'com2 accessible as clusteradmin'"
       register: test_result
       changed_when: false
 
