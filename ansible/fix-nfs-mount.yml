@@ -1,0 +1,138 @@
+---
+- name: Fix NFS mount on com2
+  hosts: compute
+  gather_facts: yes
+  become: yes
+
+  tasks:
+    - name: Install NFS utilities
+      dnf:
+        name: nfs-utils
+        state: present
+
+    - name: Set SELinux boolean for NFS home dirs
+      seboolean:
+        name: use_nfs_home_dirs
+        state: yes
+        persistent: yes
+
+    - name: Check if /home is already mounted
+      shell: mount | grep "head:/home on /home" || true
+      register: mount_check
+      changed_when: false
+
+    - name: Mount NFS home directory if not already mounted
+      mount:
+        path: /home
+        src: "head:/home"
+        fstype: nfs
+        state: mounted
+        opts: defaults,_netdev
+      when: "'head:/home on /home' not in mount_check.stdout"
+
+    - name: Verify NFS mount
+      command: df -h | grep home
+      register: nfs_verify
+      changed_when: false
+
+    - name: Show NFS mount status
+      debug:
+        msg: "{{ nfs_verify.stdout }}"
+
+- name: Configure Chrony on com2
+  hosts: 10.106.0.3
+  gather_facts: yes
+  become: yes
+
+  tasks:
+    - name: Configure chrony.conf for compute nodes
+      copy:
+        content: |
+          server head iburst
+          driftfile /var/lib/chrony/drift
+          makestep 1.0 3
+          rtcsync
+          logdir /var/log/chrony
+        dest: /etc/chrony.conf
+        backup: yes
+
+    - name: Start and enable chronyd
+      systemd:
+        name: chronyd
+        state: restarted
+        enabled: yes
+
+    - name: Check chrony sources
+      command: chronyc sources
+      register: chrony_status
+      changed_when: false
+
+    - name: Show chrony status
+      debug:
+        msg: "{{ chrony_status.stdout_lines }}"
+
+- name: Configure nftables on com2
+  hosts: 10.106.0.3
+  gather_facts: yes
+  become: yes
+
+  tasks:
+    - name: Install nftables
+      dnf:
+        name: nftables
+        state: present
+
+    - name: Configure basic nftables firewall
+      copy:
+        content: |
+          #!/usr/sbin/nft -f
+          flush ruleset
+          
+          table inet filter {
+            chain input {
+              type filter hook input priority 0; policy drop;
+              
+              ct state established,related accept
+              iifname "lo" accept
+              
+              # SSH
+              tcp dport 22 accept
+              
+              # NFS
+              tcp dport 2049 accept
+              udp dport 2049 accept
+              
+              # NTP
+              udp dport 123 accept
+              
+              # Internal cluster communication
+              ip saddr 10.106.0.0/20 accept
+              
+              icmp type echo-request accept
+            }
+            
+            chain forward {
+              type filter hook forward priority 0; policy drop;
+            }
+            
+            chain output {
+              type filter hook output priority 0; policy accept;
+            }
+          }
+        dest: /etc/sysconfig/nftables.conf
+        mode: 0644
+
+    - name: Start and enable nftables
+      systemd:
+        name: nftables
+        state: restarted
+        enabled: yes
+
+    - name: Show nftables rules
+      command: nft list ruleset
+      register: nft_rules
+      changed_when: false
+
+    - name: Display nftables rules
+      debug:
+        msg: "{{ nft_rules.stdout_lines }}"

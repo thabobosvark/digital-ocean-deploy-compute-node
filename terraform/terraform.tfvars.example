@@ -1,0 +1,14 @@
+# DigitalOcean Authentication
+do_token = "YOUR_DIGITALOCEAN_API_TOKEN_HERE"
+
+# Deployment Configuration
+region       = "lon1"
+cluster_name = "student-cluster"
+com2_size    = "s-2vcpu-4gb"
+image        = "rockylinux-9-x64"
+
+# SSH Configuration
+private_key_path = "~/.ssh/id_ed25519"
+
+# Tags
+tags = ["week4-deployment", "hpc-cluster", "terraform-ansible"]

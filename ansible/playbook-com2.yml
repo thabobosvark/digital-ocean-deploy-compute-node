@@ -1,0 +1,203 @@
+---
+- name: Configure com2 node and integrate with cluster
+  hosts: compute
+  gather_facts: yes
+  become: yes
+  vars:
+    cluster_user: "clusteradmin"
+
+  tasks:
+    - name: Ensure clusteradmin user exists
+      user:
+        name: "{{ cluster_user }}"
+        state: present
+        groups: wheel
+        append: yes
+        create_home: yes
+
+    - name: Set password for clusteradmin
+      user:
+        name: "{{ cluster_user }}"
+        password: "{{ 'clusteradmin123' | password_hash('sha512') }}"
+
+    - name: Configure sudo for clusteradmin
+      copy:
+        content: "{{ cluster_user }} ALL=(ALL) NOPASSWD:ALL"
+        dest: "/etc/sudoers.d/{{ cluster_user }}"
+        mode: 0440
+
+    - name: Configure /etc/hosts for cluster
+      blockinfile:
+        path: /etc/hosts
+        block: |
+          10.106.0.5 head
+          10.106.0.4 com1
+          10.106.0.3 com2
+        marker: "# {mark} ANSIBLE MANAGED BLOCK - CLUSTER NODES"
+
+    - name: Install base packages
+      dnf:
+        name:
+          - nftables
+          - nfs-utils
+          - chrony
+          - openssh-clients
+        state: present
+
+    - name: Stop and mask firewalld
+      systemd:
+        name: firewalld
+        state: stopped
+        enabled: no
+        masked: yes
+
+    - name: Create .ssh directory for clusteradmin
+      file:
+        path: "/home/{{ cluster_user }}/.ssh"
+        state: directory
+        owner: "{{ cluster_user }}"
+        group: "{{ cluster_user }}"
+        mode: 0700
+
+    - name: Set SELinux boolean for NFS home dirs
+      seboolean:
+        name: use_nfs_home_dirs
+        state: yes
+        persistent: yes
+
+    - name: Configure NFS client
+      block:
+        - name: Mount NFS home directory
+          mount:
+            path: /home
+            src: "head:/home"
+            fstype: nfs
+            state: mounted
+            opts: defaults,_netdev
+
+    - name: Configure Chrony NTP client for compute nodes
+      block:
+        - name: Configure chrony.conf for compute nodes
+          copy:
+            content: |
+              server head iburst
+              driftfile /var/lib/chrony/drift
+              makestep 1.0 3
+              rtcsync
+              logdir /var/log/chrony
+            dest: /etc/chrony.conf
+            backup: yes
+
+        - name: Start and enable chronyd
+          systemd:
+            name: chronyd
+            state: restarted
+            enabled: yes
+
+    - name: Configure basic nftables firewall
+      copy:
+        content: |
+          #!/usr/sbin/nft -f
+          flush ruleset
+          
+          table inet filter {
+            chain input {
+              type filter hook input priority 0; policy drop;
+              
+              ct state established,related accept
+              iifname "lo" accept
+              
+              # SSH
+              tcp dport 22 accept
+              
+              # NFS
+              tcp dport 2049 accept
+              udp dport 2049 accept
+              
+              # NTP
+              udp dport 123 accept
+              
+              # Internal cluster communication
+              ip saddr 10.106.0.0/20 accept
+              
+              icmp type echo-request accept
+            }
+            
+            chain forward {
+              type filter hook forward priority 0; policy drop;
+            }
+            
+            chain output {
+              type filter hook output priority 0; policy accept;
+            }
+          }
+        dest: /etc/sysconfig/nftables.conf
+        mode: 0644
+
+    - name: Start and enable nftables
+      systemd:
+        name: nftables
+        state: restarted
+        enabled: yes
+
+    - name: Set proper permissions on clusteradmin home
+      file:
+        path: "/home/{{ cluster_user }}"
+        owner: "{{ cluster_user }}"
+        group: "{{ cluster_user }}"
+        recurse: yes
+
+- name: Update head node configuration for com2
+  hosts: head
+  gather_facts: yes
+  become: yes
+
+  tasks:
+    - name: Add com2 to head node /etc/hosts
+      lineinfile:
+        path: /etc/hosts
+        line: "10.106.0.3 com2"
+        state: present
+
+    - name: Update NFS exports to include com2
+      lineinfile:
+        path: /etc/exports
+        line: "/home 10.106.0.3(rw,async,no_subtree_check,no_root_squash)"
+        state: present
+
+    - name: Refresh NFS exports
+      command: exportfs -ra
+
+    - name: Restart NFS server
+      systemd:
+        name: nfs-server
+        state: restarted
+
+    - name: Setup passwordless SSH from head to com2
+      block:
+        - name: Copy head's public key to com2
+          authorized_key:
+            user: "{{ cluster_user }}"
+            state: present
+            key: "{{ lookup('file', '/home/clusteradmin/.ssh/id_ed25519.pub') }}"
+          delegate_to: "10.106.0.3"
+
+        - name: Add com2 to head's known_hosts
+          shell: |
+            ssh-keyscan -H com2 >> /home/clusteradmin/.ssh/known_hosts
+          become_user: clusteradmin
+
+- name: Test cluster connectivity
+  hosts: localhost
+  gather_facts: no
+
+  tasks:
+    - name: Test SSH connectivity between nodes
+      shell: |
+        ssh -o StrictHostKeyChecking=no clusteradmin@head "ssh -o StrictHostKeyChecking=no com1 hostname && ssh -o StrictHostKeyChecking=no com2 hostname"
+      register: connectivity_test
+      changed_when: false
+
+    - name: Display connectivity test results
+      debug:
+        msg: "{{ connectivity_test.stdout }}"

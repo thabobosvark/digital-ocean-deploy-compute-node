@@ -1,0 +1,17 @@
+---
+# Cluster configuration
+head_private_ip: "10.106.0.5"
+cluster_network: "10.106.0.0/20"
+
+# Package versions
+nftables_version: present
+nfs_utils_version: present
+chrony_version: present
+
+# Service states
+nftables_enabled: true
+nfs_server_enabled: true
+chronyd_enabled: true
+
+# User configuration
+cluster_user: "clusteradmin"

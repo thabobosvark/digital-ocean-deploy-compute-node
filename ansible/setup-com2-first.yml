@@ -1,0 +1,62 @@
+---
+- name: Initial setup for com2 - create clusteradmin user
+  hosts: compute_new
+  gather_facts: yes
+  become: yes
+
+  tasks:
+    - name: Create clusteradmin user
+      user:
+        name: clusteradmin
+        state: present
+        groups: wheel
+        append: yes
+        create_home: yes
+
+    - name: Set password for clusteradmin
+      user:
+        name: clusteradmin
+        password: "{{ 'clusteradmin123' | password_hash('sha512') }}"
+
+    - name: Configure sudo for clusteradmin
+      copy:
+        content: "clusteradmin ALL=(ALL) NOPASSWD:ALL"
+        dest: /etc/sudoers.d/clusteradmin
+        mode: 0440
+
+    - name: Create .ssh directory for clusteradmin
+      file:
+        path: /home/clusteradmin/.ssh
+        state: directory
+        owner: clusteradmin
+        group: clusteradmin
+        mode: 0700
+
+    - name: Copy SSH public key to clusteradmin
+      authorized_key:
+        user: clusteradmin
+        state: present
+        key: "{{ lookup('file', '/home/clusteradmin/.ssh/id_ed25519.pub') }}"
+
+    - name: Configure /etc/hosts for cluster
+      blockinfile:
+        path: /etc/hosts
+        block: |
+          10.106.0.5 head
+          10.106.0.4 com1
+          10.106.0.3 com2
+        marker: "# {mark} ANSIBLE MANAGED BLOCK - CLUSTER NODES"
+
+- name: Verify clusteradmin setup on com2
+  hosts: localhost
+  gather_facts: no
+
+  tasks:
+    - name: Test SSH as clusteradmin to com2
+      command: ssh -o StrictHostKeyChecking=no clusteradmin@10.106.0.3 "echo 'com2 accessible as clusteradmin'"
+      register: test_result
+      changed_when: false
+
+    - name: Display test result
+      debug:
+        msg: "{{ test_result.stdout }}"

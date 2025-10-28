@@ -1,0 +1,71 @@
+---
+- name: Final cluster configuration fixes
+  hosts: compute
+  gather_facts: yes
+  become: yes
+
+  tasks:
+    - name: Verify NFS mount with correct command
+      shell: df -h | grep home || true
+      register: nfs_verify
+      changed_when: false
+
+    - name: Show NFS mount status
+      debug:
+        msg: "{{ nfs_verify.stdout }}"
+
+    - name: Ensure NFS is in fstab for persistence
+      lineinfile:
+        path: /etc/fstab
+        line: "head:/home /home nfs defaults,_netdev 0 0"
+        state: present
+
+    - name: Install and configure nftables on com2
+      dnf:
+        name: nftables
+        state: present
+
+    - name: Configure nftables rules
+      copy:
+        content: |
+          table inet filter {
+            chain input {
+              type filter hook input priority 0; policy drop;
+              ct state established,related accept
+              iifname "lo" accept
+              tcp dport 22 accept
+              tcp dport 2049 accept
+              udp dport 2049 accept
+              udp dport 123 accept
+              ip saddr 10.106.0.0/20 accept
+              icmp type echo-request accept
+            }
+            chain forward {
+              type filter hook forward priority 0; policy drop;
+            }
+            chain output {
+              type filter hook output priority 0; policy accept;
+            }
+          }
+        dest: /etc/sysconfig/nftables.conf
+
+    - name: Start and enable nftables
+      systemd:
+        name: nftables
+        state: started
+        enabled: yes
+
+- name: Final verification
+  hosts: localhost
+  gather_facts: no
+
+  tasks:
+    - name: Test complete cluster connectivity
+      shell: |
+        ssh clusteradmin@head "ssh com1 'ssh com2 echo \"Three-hop SSH successful\"'"
+      register: cluster_test
+      changed_when: false
+
+    - name: Show cluster test result
+      debug:
+        msg: "{{ cluster_test.stdout }}"
