@@ -77,23 +77,22 @@ jobs:
         echo "Com1 IP: $(cat ../ansible/com1_ip.txt)"
         echo "Com2 IP: $(cat ../ansible/com2_ip.txt)"
 
-    - name: Create simple inventory file
+    - name: Create simple inventory using echo
       run: |
-        # Create a very simple inventory with just IPs
+        # Read the IPs
         HEAD_IP=$(cat ansible/head_ip.txt)
         COM1_IP=$(cat ansible/com1_ip.txt)
         COM2_IP=$(cat ansible/com2_ip.txt)
         
-        cat > ansible/inventory.ini << INVENTORY
-${HEAD_IP}
-${COM1_IP}
-${COM2_IP}
-
-[all:vars]
-ansible_user=root
-ansible_ssh_private_key_file=/tmp/ssh_key
-ansible_ssh_common_args='-o StrictHostKeyChecking=no'
-INVENTORY
+        # Create inventory using echo commands (no heredoc)
+        echo "$HEAD_IP" > ansible/inventory.ini
+        echo "$COM1_IP" >> ansible/inventory.ini
+        echo "$COM2_IP" >> ansible/inventory.ini
+        echo "" >> ansible/inventory.ini
+        echo "[all:vars]" >> ansible/inventory.ini
+        echo "ansible_user=root" >> ansible/inventory.ini
+        echo "ansible_ssh_private_key_file=/tmp/ssh_key" >> ansible/inventory.ini
+        echo "ansible_ssh_common_args='-o StrictHostKeyChecking=no'" >> ansible/inventory.ini
 
     - name: Display inventory for debugging
       run: |
