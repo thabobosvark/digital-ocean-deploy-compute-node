@@ -35,15 +35,13 @@ jobs:
 
     - name: Create terraform.tfvars from secrets
       run: |
-        cat << 'EOT' > terraform/terraform.tfvars
-do_token = "${{ secrets.DIGITALOCEAN_TOKEN }}"
-region = "lon1"
-cluster_name = "student-cluster"
-com2_size = "s-2vcpu-4gb"
-image = "rockylinux-9-x64"
-private_key_path = "/tmp/ssh_key"
-tags = ["github-actions", "hpc-cluster", "automated"]
-EOT
+        echo 'do_token = "${{ secrets.DIGITALOCEAN_TOKEN }}"' > terraform/terraform.tfvars
+        echo 'region = "lon1"' >> terraform/terraform.tfvars
+        echo 'cluster_name = "student-cluster"' >> terraform/terraform.tfvars
+        echo 'com2_size = "s-2vcpu-4gb"' >> terraform/terraform.tfvars
+        echo 'image = "rockylinux-9-x64"' >> terraform/terraform.tfvars
+        echo 'private_key_path = "/tmp/ssh_key"' >> terraform/terraform.tfvars
+        echo 'tags = ["github-actions", "hpc-cluster", "automated"]' >> terraform/terraform.tfvars
 
     - name: Setup SSH key for Ansible
       run: |
@@ -74,15 +72,13 @@ EOT
 
     - name: Create terraform.tfvars from secrets
       run: |
-        cat << 'EOT' > terraform/terraform.tfvars
-do_token = "${{ secrets.DIGITALOCEAN_TOKEN }}"
-region = "lon1"
-cluster_name = "student-cluster"
-com2_size = "s-2vcpu-4gb"
-image = "rockylinux-9-x64"
-private_key_path = "/tmp/ssh_key"
-tags = ["github-actions", "hpc-cluster", "automated"]
-EOT
+        echo 'do_token = "${{ secrets.DIGITALOCEAN_TOKEN }}"' > terraform/terraform.tfvars
+        echo 'region = "lon1"' >> terraform/terraform.tfvars
+        echo 'cluster_name = "student-cluster"' >> terraform/terraform.tfvars
+        echo 'com2_size = "s-2vcpu-4gb"' >> terraform/terraform.tfvars
+        echo 'image = "rockylinux-9-x64"' >> terraform/terraform.tfvars
+        echo 'private_key_path = "/tmp/ssh_key"' >> terraform/terraform.tfvars
+        echo 'tags = ["github-actions", "hpc-cluster", "automated"]' >> terraform/terraform.tfvars
 
     - name: Setup SSH key for Ansible
       run: |
