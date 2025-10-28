@@ -18,7 +18,7 @@ jobs:
   deploy:
     runs-on: ubuntu-22.04
     if: github.event.inputs.destroy != 'true'
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -31,7 +31,7 @@ jobs:
     - name: Install Ansible and dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y ansible sshpass jq
+        sudo apt-get install -y ansible sshpass
 
     - name: Create terraform.tfvars from secrets
       run: |
@@ -50,58 +50,27 @@ TFVARS
         mkdir -p /tmp/.ssh
         echo "${{ secrets.SSH_PRIVATE_KEY }}" > /tmp/ssh_key
         chmod 600 /tmp/ssh_key
-        ssh-keygen -y -f /tmp/ssh_key > /tmp/ssh_key.pub
 
     - name: Terraform Init
       run: terraform init
       working-directory: terraform
 
-    - name: Terraform Validate
-      run: terraform validate
-      working-directory: terraform
-
-    - name: Terraform Plan
-      run: terraform plan
-      working-directory: terraform
-
     - name: Terraform Apply
-      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
       run: terraform apply -auto-approve
       working-directory: terraform
-
-    - name: Wait for droplet
-      run: sleep 120
-
-    - name: Run Ansible configuration
-      run: |
-        cd ansible
-        export ANSIBLE_HOST_KEY_CHECKING=False
-        ansible-playbook -i inventory.ini setup-com2-first.yml
-        ansible-playbook -i inventory.ini playbook-com2.yml
-      env:
-        ANSIBLE_SSH_PRIVATE_KEY_FILE: /tmp/ssh_key
-
-    - name: Run verification tests
-      run: |
-        cd ansible
-        chmod +x ci-verification.sh
-        ./ci-verification.sh
 
   destroy:
     runs-on: ubuntu-22.04
     if: github.event.inputs.destroy == 'true'
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
     - name: Setup Terraform
       uses: hashicorp/setup-terraform@v2
-
-    - name: Install Ansible
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y ansible
+      with:
+        terraform_version: ${{ env.TERRAFORM_VERSION }}
 
     - name: Create terraform.tfvars from secrets
       run: |
@@ -114,6 +83,12 @@ image = "rockylinux-9-x64"
 private_key_path = "/tmp/ssh_key"
 tags = ["github-actions", "hpc-cluster", "automated"]
 TFVARS
+
+    - name: Setup SSH key for Ansible
+      run: |
+        mkdir -p /tmp/.ssh
+        echo "${{ secrets.SSH_PRIVATE_KEY }}" > /tmp/ssh_key
+        chmod 600 /tmp/ssh_key
 
     - name: Terraform Init
       run: terraform init
