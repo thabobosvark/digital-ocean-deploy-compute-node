@@ -35,7 +35,7 @@ jobs:
 
     - name: Create terraform.tfvars from secrets
       run: |
-        cat > terraform/terraform.tfvars << TFVARS
+        cat > terraform/terraform.tfvars << 'TFVARS'
 do_token = "${{ secrets.DIGITALOCEAN_TOKEN }}"
 region = "lon1"
 cluster_name = "student-cluster"
@@ -69,100 +69,17 @@ TFVARS
       run: terraform apply -auto-approve
       working-directory: terraform
 
-    - name: Get droplet IP addresses
-      id: get-ips
-      run: |
-        cd terraform
-        COM2_PUBLIC_IP=$(terraform output -raw com2_details | jq -r '.public_ip')
-        COM2_PRIVATE_IP=$(terraform output -raw com2_details | jq -r '.private_ip')
-        echo "com2_public_ip=$COM2_PUBLIC_IP" >> $GITHUB_OUTPUT
-        echo "com2_private_ip=$COM2_PRIVATE_IP" >> $GITHUB_OUTPUT
-        echo "Com2 Public IP: $COM2_PUBLIC_IP"
-        echo "Com2 Private IP: $COM2_PRIVATE_IP"
+    - name: Wait for droplet
+      run: sleep 120
 
-    - name: Wait for SSH to be ready
-      run: |
-        cd terraform
-        COM2_PUBLIC_IP=$(terraform output -raw com2_details | jq -r '.public_ip')
-        echo "Waiting for SSH on $COM2_PUBLIC_IP..."
-        
-        for i in {1..30}; do
-          if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i /tmp/ssh_key root@$COM2_PUBLIC_IP "echo SSH ready"; then
-            echo "SSH is ready!"
-            break
-          else
-            echo "Attempt $i: SSH not ready yet, waiting 10 seconds..."
-            sleep 10
-          fi
-        done
-
-    - name: Update inventory with actual IPs
-      run: |
-        cd terraform
-        HEAD_PRIVATE_IP=$(terraform output -raw existing_cluster_ips | jq -r '.head.private')
-        COM1_PRIVATE_IP=$(terraform output -raw existing_cluster_ips | jq -r '.com1.private')
-        COM2_PRIVATE_IP=$(terraform output -raw com2_details | jq -r '.private_ip')
-        
-        cat > ../ansible/inventory.ini << INVENTORY
-[head]
-$HEAD_PRIVATE_IP ansible_user=clusteradmin ansible_ssh_private_key_file=/tmp/ssh_key ansible_become=yes
-
-[compute]
-$COM1_PRIVATE_IP ansible_user=clusteradmin ansible_ssh_private_key_file=/tmp/ssh_key ansible_become=yes
-$COM2_PRIVATE_IP ansible_user=root ansible_ssh_private_key_file=/tmp/ssh_key ansible_become=yes
-
-[compute_new]
-$COM2_PRIVATE_IP ansible_user=root ansible_ssh_private_key_file=/tmp/ssh_key
-
-[all:vars]
-ansible_python_interpreter=/usr/bin/python3
-private_network=10.106.0.0/20
-head_private_ip=$HEAD_PRIVATE_IP
-ansible_ssh_common_args='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
-INVENTORY
-        
-        echo "Generated inventory:"
-        cat ../ansible/inventory.ini
-
-    - name: Test SSH connectivity
-      run: |
-        cd ansible
-        echo "Testing SSH connectivity..."
-        ansible all -i inventory.ini -m ping
-
-    - name: Run initial com2 setup
+    - name: Run Ansible configuration
       run: |
         cd ansible
         export ANSIBLE_HOST_KEY_CHECKING=False
         ansible-playbook -i inventory.ini setup-com2-first.yml
-
-    - name: Update inventory for clusteradmin access
-      run: |
-        cd terraform
-        HEAD_PRIVATE_IP=$(terraform output -raw existing_cluster_ips | jq -r '.head.private')
-        COM1_PRIVATE_IP=$(terraform output -raw existing_cluster_ips | jq -r '.com1.private')
-        COM2_PRIVATE_IP=$(terraform output -raw com2_details | jq -r '.private_ip')
-        
-        cat > ../ansible/inventory.ini << INVENTORY
-[head]
-$HEAD_PRIVATE_IP ansible_user=clusteradmin ansible_ssh_private_key_file=/tmp/ssh_key ansible_become=yes
-
-[compute]
-$COM1_PRIVATE_IP ansible_user=clusteradmin ansible_ssh_private_key_file=/tmp/ssh_key ansible_become=yes
-$COM2_PRIVATE_IP ansible_user=clusteradmin ansible_ssh_private_key_file=/tmp/ssh_key ansible_become=yes
-
-[all:vars]
-ansible_python_interpreter=/usr/bin/python3
-private_network=10.106.0.0/20
-head_private_ip=$HEAD_PRIVATE_IP
-ansible_ssh_common_args='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
-INVENTORY
-
-    - name: Run main configuration
-      run: |
-        cd ansible
-        export ANSIBLE_HOST_KEY_CHECKING=False
         ansible-playbook -i inventory.ini playbook-com2.yml
+      env:
+        ANSIBLE_SSH_PRIVATE_KEY_FILE: /tmp/ssh_key
 
     - name: Run verification tests
       run: |
@@ -188,7 +105,7 @@ INVENTORY
 
     - name: Create terraform.tfvars from secrets
       run: |
-        cat > terraform/terraform.tfvars << TFVARS
+        cat > terraform/terraform.tfvars << 'TFVARS'
 do_token = "${{ secrets.DIGITALOCEAN_TOKEN }}"
 region = "lon1"
 cluster_name = "student-cluster"
