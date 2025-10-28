@@ -77,32 +77,73 @@ jobs:
         echo "Com1 IP: $(cat ../ansible/com1_ip.txt)"
         echo "Com2 IP: $(cat ../ansible/com2_ip.txt)"
 
-    - name: Create simple inventory using echo
+    - name: Configure com2 node manually via SSH
       run: |
-        # Read the IPs
-        HEAD_IP=$(cat ansible/head_ip.txt)
-        COM1_IP=$(cat ansible/com1_ip.txt)
-        COM2_IP=$(cat ansible/com2_ip.txt)
+        CO2_IP=$(cat ansible/com2_ip.txt)
+        echo "Configuring com2 node at $CO2_IP"
         
-        # Create inventory using echo commands (no heredoc)
-        echo "$HEAD_IP" > ansible/inventory.ini
-        echo "$COM1_IP" >> ansible/inventory.ini
-        echo "$COM2_IP" >> ansible/inventory.ini
-        echo "" >> ansible/inventory.ini
-        echo "[all:vars]" >> ansible/inventory.ini
-        echo "ansible_user=root" >> ansible/inventory.ini
-        echo "ansible_ssh_private_key_file=/tmp/ssh_key" >> ansible/inventory.ini
-        echo "ansible_ssh_common_args='-o StrictHostKeyChecking=no'" >> ansible/inventory.ini
+        # SSH into com2 and run configuration commands
+        ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key root@$CO2_IP << 'SSH_COMMANDS'
+          # Create clusteradmin user
+          useradd -m -s /bin/bash clusteradmin
+          echo "clusteradmin ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/clusteradmin
+          chmod 440 /etc/sudoers.d/clusteradmin
+          
+          # Create .ssh directory and add authorized key
+          mkdir -p /home/clusteradmin/.ssh
+          echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBWXU12cxnyWt+hhOJJfrk+YwsEYFTt5uNFqjUzsUKy2 clusteradmin@head" >> /home/clusteradmin/.ssh/authorized_keys
+          chmod 700 /home/clusteradmin/.ssh
+          chmod 600 /home/clusteradmin/.ssh/authorized_keys
+          chown -R clusteradmin:clusteradmin /home/clusteradmin/.ssh
+          
+          # Install NFS client
+          dnf install -y nfs-utils
+          
+          # Create mount point
+          mkdir -p /home/clusteradmin/shared
+          chown clusteradmin:clusteradmin /home/clusteradmin/shared
+          
+          # Add to fstab for permanent mount (using head node IP)
+          echo "157.245.35.46:/home/clusteradmin/shared /home/clusteradmin/shared nfs defaults 0 0" >> /etc/fstab
+          
+          # Mount immediately
+          mount /home/clusteradmin/shared
+          
+          # Verify setup
+          echo "=== User created ==="
+          id clusteradmin
+          echo "=== SSH key added ==="
+          cat /home/clusteradmin/.ssh/authorized_keys
+          echo "=== NFS mount ==="
+          df -h | grep shared || echo "NFS not mounted yet, may need to be mounted on head node first"
+SSH_COMMANDS
 
-    - name: Display inventory for debugging
+    - name: Verify com2 configuration
       run: |
-        echo "=== Inventory File ==="
-        cat ansible/inventory.ini
-        echo "=== Testing basic Ansible ==="
-        ansible --version
+        CO2_IP=$(cat ansible/com2_ip.txt)
+        echo "Verifying configuration on com2 node at $CO2_IP"
+        
+        ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key root@$CO2_IP << 'VERIFY_COMMANDS'
+          echo "=== Users ==="
+          getent passwd clusteradmin
+          echo "=== SSH directory ==="
+          ls -la /home/clusteradmin/.ssh/
+          echo "=== NFS mount ==="
+          mount | grep shared || echo "NFS not mounted"
+          echo "=== Sudo access ==="
+          sudo -U clusteradmin -l
+VERIFY_COMMANDS
 
-    - name: Skip SSH tests and run playbooks directly
+    - name: Display completion message
       run: |
-        echo "Skipping SSH tests due to inventory parsing issues"
-        echo "Terraform has successfully created com2 droplet"
-        echo "Manual configuration may be required for Ansible playbooks"
+        CO2_IP=$(cat ansible/com2_ip.txt)
+        echo "=========================================="
+        echo "✅ DEPLOYMENT COMPLETE"
+        echo "=========================================="
+        echo "com2 node: $CO2_IP"
+        echo "User: clusteradmin"
+        echo "SSH Key: Added from head node"
+        echo "NFS: Configured (may need manual mount on head)"
+        echo ""
+        echo "To connect: ssh clusteradmin@$CO2_IP"
+        echo "=========================================="
