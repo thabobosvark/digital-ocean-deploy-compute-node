@@ -28,29 +28,28 @@ jobs:
       with:
         terraform_version: ${{ env.TERRAFORM_VERSION }}
 
-    - name: Install Ansible (Ubuntu)
+    - name: Install Ansible and dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y ansible sshpass
+        sudo apt-get install -y ansible sshpass jq
 
     - name: Create terraform.tfvars from secrets
       run: |
         cat > terraform/terraform.tfvars << TFVARS
-        do_token = "${{ secrets.DIGITALOCEAN_TOKEN }}"
-        region = "lon1"
-        cluster_name = "student-cluster"
-        com2_size = "s-2vcpu-4gb"
-        image = "rockylinux-9-x64"
-        private_key_path = "/tmp/ssh_key"
-        tags = ["github-actions", "hpc-cluster", "automated"]
-        TFVARS
+do_token = "${{ secrets.DIGITALOCEAN_TOKEN }}"
+region = "lon1"
+cluster_name = "student-cluster"
+com2_size = "s-2vcpu-4gb"
+image = "rockylinux-9-x64"
+private_key_path = "/tmp/ssh_key"
+tags = ["github-actions", "hpc-cluster", "automated"]
+TFVARS
 
     - name: Setup SSH key for Ansible
       run: |
         mkdir -p /tmp/.ssh
         echo "${{ secrets.SSH_PRIVATE_KEY }}" > /tmp/ssh_key
         chmod 600 /tmp/ssh_key
-        # Generate public key from private key
         ssh-keygen -y -f /tmp/ssh_key > /tmp/ssh_key.pub
 
     - name: Terraform Init
@@ -81,13 +80,12 @@ jobs:
         echo "Com2 Public IP: $COM2_PUBLIC_IP"
         echo "Com2 Private IP: $COM2_PRIVATE_IP"
 
-    - name: Wait for SSH to be ready (with retry)
+    - name: Wait for SSH to be ready
       run: |
         cd terraform
         COM2_PUBLIC_IP=$(terraform output -raw com2_details | jq -r '.public_ip')
         echo "Waiting for SSH on $COM2_PUBLIC_IP..."
         
-        # Wait for SSH to be available with retries
         for i in {1..30}; do
           if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i /tmp/ssh_key root@$COM2_PUBLIC_IP "echo SSH ready"; then
             echo "SSH is ready!"
@@ -126,7 +124,7 @@ INVENTORY
         echo "Generated inventory:"
         cat ../ansible/inventory.ini
 
-    - name: Test SSH connectivity to all nodes
+    - name: Test SSH connectivity
       run: |
         cd ansible
         echo "Testing SSH connectivity..."
@@ -183,7 +181,7 @@ INVENTORY
     - name: Setup Terraform
       uses: hashicorp/setup-terraform@v2
 
-    - name: Install Ansible (Ubuntu)
+    - name: Install Ansible
       run: |
         sudo apt-get update
         sudo apt-get install -y ansible
@@ -191,14 +189,14 @@ INVENTORY
     - name: Create terraform.tfvars from secrets
       run: |
         cat > terraform/terraform.tfvars << TFVARS
-        do_token = "${{ secrets.DIGITALOCEAN_TOKEN }}"
-        region = "lon1"
-        cluster_name = "student-cluster"
-        com2_size = "s-2vcpu-4gb"
-        image = "rockylinux-9-x64"
-        private_key_path = "/tmp/ssh_key"
-        tags = ["github-actions", "hpc-cluster", "automated"]
-        TFVARS
+do_token = "${{ secrets.DIGITALOCEAN_TOKEN }}"
+region = "lon1"
+cluster_name = "student-cluster"
+com2_size = "s-2vcpu-4gb"
+image = "rockylinux-9-x64"
+private_key_path = "/tmp/ssh_key"
+tags = ["github-actions", "hpc-cluster", "automated"]
+TFVARS
 
     - name: Terraform Init
       run: terraform init
