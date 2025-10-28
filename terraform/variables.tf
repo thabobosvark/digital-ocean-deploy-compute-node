@@ -1,11 +1,9 @@
-# DigitalOcean Authentication
 variable "do_token" {
   description = "DigitalOcean API token"
   type        = string
   sensitive   = true
 }
 
-# Deployment Configuration
 variable "region" {
   description = "DigitalOcean region"
   type        = string
@@ -13,16 +11,15 @@ variable "region" {
 }
 
 variable "cluster_name" {
-  description = "Cluster name prefix for resources"
+  description = "Name of the cluster"
   type        = string
   default     = "student-cluster"
 }
 
-# Instance Configuration
 variable "com2_size" {
-  description = "Droplet size for com2"
+  description = "Size for com2 node"
   type        = string
-  default     = "s-2vcpu-4gb"  # Matches your com1 specs
+  default     = "s-2vcpu-4gb"
 }
 
 variable "image" {
@@ -31,16 +28,19 @@ variable "image" {
   default     = "rockylinux-9-x64"
 }
 
-# SSH Configuration
 variable "private_key_path" {
   description = "Path to the private key file"
   type        = string
-  default     = "~/.ssh/id_ed25519"
 }
 
-# Tags
 variable "tags" {
-  description = "Tags to apply to resources"
+  description = "Tags for droplets"
   type        = list(string)
-  default     = ["student-cluster", "hpc", "com2", "automated"]
+  default     = ["github-actions", "hpc-cluster", "automated"]
+}
+
+variable "existing_droplet_names" {
+  description = "Names of existing droplets (head and com1)"
+  type        = list(string)
+  default     = ["head", "com1"]
 }
