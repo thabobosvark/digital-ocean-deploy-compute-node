@@ -98,48 +98,62 @@ jobs:
         echo "Com1 IP: $(cat ../ansible/com1_ip.txt)"
         echo "Com2 IP: $(cat ../ansible/com2_ip.txt)"
 
-    - name: Create inventory
+    - name: Create proper Ansible inventory
       run: |
-        echo "[head]" > ansible/inventory.ini
-        cat ansible/head_ip.txt >> ansible/inventory.ini
-        echo "" >> ansible/inventory.ini
-        echo "[com1]" >> ansible/inventory.ini
-        cat ansible/com1_ip.txt >> ansible/inventory.ini
-        echo "" >> ansible/inventory.ini
-        echo "[com2]" >> ansible/inventory.ini
-        cat ansible/com2_ip.txt >> ansible/inventory.ini
-        echo "" >> ansible/inventory.ini
-        echo "[compute_nodes]" >> ansible/inventory.ini
-        cat ansible/com1_ip.txt >> ansible/inventory.ini
-        cat ansible/com2_ip.txt >> ansible/inventory.ini
-        echo "" >> ansible/inventory.ini
-        echo "[all:vars]" >> ansible/inventory.ini
-        echo "ansible_user=root" >> ansible/inventory.ini
-        echo "ansible_ssh_private_key_file=/tmp/ssh_key" >> ansible/inventory.ini
-        echo "ansible_ssh_common_args='-o StrictHostKeyChecking=no'" >> ansible/inventory.ini
+        echo "=== Creating Ansible inventory ==="
+        
+        # Remove any existing inventory file and recreate it properly
+        rm -f ansible/inventory.ini
+        
+        # Create inventory with proper formatting
+        cat > ansible/inventory.ini << 'INVENTORY'
+[head]
+$(cat ansible/head_ip.txt)
 
-    - name: Display inventory
+[com1]
+$(cat ansible/com1_ip.txt)
+
+[com2]
+$(cat ansible/com2_ip.txt)
+
+[compute_nodes]
+$(cat ansible/com1_ip.txt)
+$(cat ansible/com2_ip.txt)
+
+[all:vars]
+ansible_user=root
+ansible_ssh_private_key_file=/tmp/ssh_key
+ansible_ssh_common_args='-o StrictHostKeyChecking=no'
+INVENTORY
+
+        # Ensure proper permissions
+        chmod 644 ansible/inventory.ini
+
+    - name: Display and validate inventory
       run: |
-        echo "=== Final Inventory ==="
+        echo "=== Final Inventory Contents ==="
         cat ansible/inventory.ini
+        echo "=== File Permissions ==="
+        ls -la ansible/inventory.ini
+        echo "=== Testing Inventory Parsing ==="
+        ansible-inventory -i ansible/inventory.ini --list
 
-    - name: Test SSH connections
+    - name: Test SSH connections with explicit inventory
       run: |
-        cd ansible
         echo "=== Testing SSH to all nodes ==="
-        ansible -i inventory.ini all -m ping -u root
+        ansible -i ansible/inventory.ini all -m ping
 
-    - name: Run Ansible playbooks
+    - name: Run Ansible playbooks with proper inventory
       run: |
         cd ansible
         echo "=== Running playbook-com2.yml ==="
-        ansible-playbook -i inventory.ini playbook-com2.yml
+        ansible-playbook -i ../ansible/inventory.ini playbook-com2.yml
         
         echo "=== Running fix-nfs-mount.yml ==="
-        ansible-playbook -i inventory.ini fix-nfs-mount.yml
+        ansible-playbook -i ../ansible/inventory.ini fix-nfs-mount.yml
         
         echo "=== Running fix-final.yml ==="
-        ansible-playbook -i inventory.ini fix-final.yml
+        ansible-playbook -i ../ansible/inventory.ini fix-final.yml
         
         echo "=== Running CI verification ==="
         chmod +x ci-verification.sh
