@@ -35,7 +35,7 @@ jobs:
 
     - name: Create terraform.tfvars from secrets
       run: |
-        cat > terraform/terraform.tfvars << 'TFVARS'
+        cat << 'EOT' > terraform/terraform.tfvars
 do_token = "${{ secrets.DIGITALOCEAN_TOKEN }}"
 region = "lon1"
 cluster_name = "student-cluster"
@@ -43,7 +43,7 @@ com2_size = "s-2vcpu-4gb"
 image = "rockylinux-9-x64"
 private_key_path = "/tmp/ssh_key"
 tags = ["github-actions", "hpc-cluster", "automated"]
-TFVARS
+EOT
 
     - name: Setup SSH key for Ansible
       run: |
@@ -74,7 +74,7 @@ TFVARS
 
     - name: Create terraform.tfvars from secrets
       run: |
-        cat > terraform/terraform.tfvars << 'TFVARS'
+        cat << 'EOT' > terraform/terraform.tfvars
 do_token = "${{ secrets.DIGITALOCEAN_TOKEN }}"
 region = "lon1"
 cluster_name = "student-cluster"
@@ -82,7 +82,7 @@ com2_size = "s-2vcpu-4gb"
 image = "rockylinux-9-x64"
 private_key_path = "/tmp/ssh_key"
 tags = ["github-actions", "hpc-cluster", "automated"]
-TFVARS
+EOT
 
     - name: Setup SSH key for Ansible
       run: |
