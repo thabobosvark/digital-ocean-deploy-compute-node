@@ -105,26 +105,24 @@ jobs:
         # Remove any existing inventory file and recreate it properly
         rm -f ansible/inventory.ini
         
-        # Create inventory with proper formatting
-        cat > ansible/inventory.ini << 'INVENTORY'
-[head]
-$(cat ansible/head_ip.txt)
-
-[com1]
-$(cat ansible/com1_ip.txt)
-
-[com2]
-$(cat ansible/com2_ip.txt)
-
-[compute_nodes]
-$(cat ansible/com1_ip.txt)
-$(cat ansible/com2_ip.txt)
-
-[all:vars]
-ansible_user=root
-ansible_ssh_private_key_file=/tmp/ssh_key
-ansible_ssh_common_args='-o StrictHostKeyChecking=no'
-INVENTORY
+        # Create inventory using echo commands (no heredoc issues)
+        echo "[head]" > ansible/inventory.ini
+        cat ansible/head_ip.txt >> ansible/inventory.ini
+        echo "" >> ansible/inventory.ini
+        echo "[com1]" >> ansible/inventory.ini
+        cat ansible/com1_ip.txt >> ansible/inventory.ini
+        echo "" >> ansible/inventory.ini
+        echo "[com2]" >> ansible/inventory.ini
+        cat ansible/com2_ip.txt >> ansible/inventory.ini
+        echo "" >> ansible/inventory.ini
+        echo "[compute_nodes]" >> ansible/inventory.ini
+        cat ansible/com1_ip.txt >> ansible/inventory.ini
+        cat ansible/com2_ip.txt >> ansible/inventory.ini
+        echo "" >> ansible/inventory.ini
+        echo "[all:vars]" >> ansible/inventory.ini
+        echo "ansible_user=root" >> ansible/inventory.ini
+        echo "ansible_ssh_private_key_file=/tmp/ssh_key" >> ansible/inventory.ini
+        echo "ansible_ssh_common_args='-o StrictHostKeyChecking=no'" >> ansible/inventory.ini
 
         # Ensure proper permissions
         chmod 644 ansible/inventory.ini
