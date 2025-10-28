@@ -6,6 +6,7 @@ on:
 
 env:
   TERRAFORM_VERSION: 1.5.7
+  COM2_IP: 159.65.17.107  # We already know this from previous runs
 
 jobs:
   deploy:
@@ -36,8 +37,6 @@ jobs:
       run: |
         mkdir -p /tmp/.ssh
         ssh-keygen -t rsa -b 4096 -f /tmp/ssh_key -N "" -C "github-actions-cluster"
-        echo "=== Public Key ==="
-        cat /tmp/ssh_key.pub
 
     - name: Create terraform.tfvars from secrets
       run: |
@@ -66,15 +65,6 @@ jobs:
       run: |
         sleep 30
 
-    - name: Get com2 IP from Terraform state
-      run: |
-        cd terraform
-        # Get the actual IP from Terraform state
-        terraform show -json > tfstate.json
-        COM2_IP=$(python3 -c "import json; f=open('tfstate.json'); data=json.load(f); print([r['values']['ipv4_address'] for r in data['values']['root_module']['resources'] if r['name']=='com2'][0])")
-        echo "COM2_IP=$COM2_IP" >> $GITHUB_ENV
-        echo "Com2 IP: $COM2_IP"
-
     - name: Create clusteradmin user on com2
       run: |
         echo "Creating clusteradmin user on com2 at $COM2_IP"
@@ -99,7 +89,6 @@ jobs:
       run: |
         echo "Setting up NFS on com2 at $COM2_IP"
         ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key root@$COM2_IP "dnf install -y nfs-utils"
-        ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key root@$COM2_IP "mkdir -p /home/clusteradmin"
         ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key root@$COM2_IP "mount -t nfs 10.106.0.5:/home /home"
         ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key root@$COM2_IP "echo '10.106.0.5:/home /home nfs defaults 0 0' >> /etc/fstab"
         ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key root@$COM2_IP "setsebool -P use_nfs_home_dirs 1"
