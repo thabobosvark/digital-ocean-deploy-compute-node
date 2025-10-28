@@ -25,6 +25,13 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y ansible sshpass jq
 
+    - name: Generate SSH key pair
+      run: |
+        mkdir -p /tmp/.ssh
+        ssh-keygen -t rsa -b 4096 -f /tmp/ssh_key -N "" -C "github-actions-cluster"
+        echo "=== Public Key ==="
+        cat /tmp/ssh_key.pub
+
     - name: Create terraform.tfvars from secrets
       run: |
         echo 'do_token = "${{ secrets.DIGITALOCEAN_TOKEN }}"' > terraform/terraform.tfvars
@@ -35,175 +42,54 @@ jobs:
         echo 'private_key_path = "/tmp/ssh_key"' >> terraform/terraform.tfvars
         echo 'tags = ["github-actions", "hpc-cluster", "automated"]' >> terraform/terraform.tfvars
 
-    - name: Setup SSH key for Ansible
+    - name: Setup SSH key for Terraform
       run: |
-        mkdir -p /tmp/.ssh
-        echo "${{ secrets.SSH_PRIVATE_KEY }}" > /tmp/ssh_key
+        cp /tmp/ssh_key.pub terraform/ssh_key.pub
         chmod 600 /tmp/ssh_key
 
-    - name: Terraform Init
-      run: terraform init
-      working-directory: terraform
-
-    - name: Terraform Apply
-      run: terraform apply -auto-approve
-      working-directory: terraform
-
-    - name: Wait for SSH to be ready
-      run: |
-        sleep 30
-
-    - name: Check Terraform state and extract IPs
+    - name: Terraform Init and Apply
       run: |
         cd terraform
-        
-        # First, check if we have a state file and it's valid
-        if [ ! -f terraform.tfstate ] && [ ! -f terraform.tfstate.backup ]; then
-          echo "No Terraform state file found"
-          exit 1
-        fi
-        
-        # Try to get outputs if they exist
-        echo "Checking for Terraform outputs..."
-        terraform output -json > outputs.json 2>/dev/null || echo "No outputs available"
-        
-        # Try multiple methods to extract IPs
-        echo "Attempting to extract IP addresses..."
-        
-        # Method 1: Try terraform output if outputs are defined
-        if terraform output head_ip > /dev/null 2>&1; then
-          echo "Using Terraform outputs method"
-          terraform output -raw head_ip > ../ansible/head_ip.txt 2>/dev/null || true
-          terraform output -raw com1_ip > ../ansible/com1_ip.txt 2>/dev/null || true
-          terraform output -raw com2_ip > ../ansible/com2_ip.txt 2>/dev/null || true
-        fi
-        
-        # Method 2: Try to parse state with better error handling
-        echo "Trying state parsing method..."
-        terraform show -json > tfstate.json 2>/dev/null || {
-          echo "Failed to get JSON state, trying text output"
-          terraform show > tfstate.txt
-          
-          # Extract IPs from text output
-          grep -oE 'ipv4_address[[:space:]]*=[[:space:]]*"([0-9]{1,3}\.){3}[0-9]{1,3}"' tfstate.txt | \
-          cut -d'"' -f2 > ../ansible/all_ips.txt || echo "No IPs found in text state"
-        }
-        
-        # Method 3: If we have JSON state, try to parse it carefully
-        if [ -f tfstate.json ] && [ -s tfstate.json ]; then
-          echo "Parsing JSON state file..."
-          # Check if JSON is valid
-          if jq empty tfstate.json 2>/dev/null; then
-            jq -r '.values.root_module.resources[]? | select(.type=="digitalocean_droplet")? | .values.ipv4_address? // empty' tfstate.json > ../ansible/all_ips.txt
-          else
-            echo "JSON state is invalid"
-            rm -f tfstate.json
-          fi
-        fi
-        
-        # Count whatever IPs we found
-        if [ -f ../ansible/all_ips.txt ] && [ -s ../ansible/all_ips.txt ]; then
-          DROPLET_COUNT=$(wc -l < ../ansible/all_ips.txt)
-          echo "Found $DROPLET_COUNT droplets via state parsing"
-          
-          # Assign roles based on order
-          head -1 ../ansible/all_ips.txt > ../ansible/head_ip.txt
-          [ $DROPLET_COUNT -ge 2 ] && sed -n '2p' ../ansible/all_ips.txt > ../ansible/com1_ip.txt
-          [ $DROPLET_COUNT -ge 3 ] && sed -n '3p' ../ansible/all_ips.txt > ../ansible/com2_ip.txt
-        fi
-        
-        # Method 4: Last resort - try to get IPs from DigitalOcean API directly
-        if [ ! -f ../ansible/head_ip.txt ] || [ ! -s ../ansible/head_ip.txt ]; then
-          echo "Trying DigitalOcean API method..."
-          # This would require the DO token and some API calls
-          echo "IP extraction from API not implemented yet"
-        fi
+        echo "=== Terraform Files ==="
+        ls -la *.tf
+        echo "=== Initializing Terraform ==="
+        terraform init
+        echo "=== Planning ==="
+        terraform plan
+        echo "=== Applying ==="
+        terraform apply -auto-approve
 
-    - name: Create inventory for Ansible
+    - name: Extract IP addresses
       run: |
-        echo "Creating Ansible inventory..."
+        cd terraform
+        echo "=== Extracting IPs ==="
+        terraform output -raw head_ip > ../ansible/head_ip.txt
+        terraform output -raw com1_ip > ../ansible/com1_ip.txt
+        terraform output -raw com2_ip > ../ansible/com2_ip.txt
         
-        # Initialize empty inventory
-        echo "# Auto-generated inventory" > ansible/inventory.ini
-        
-        # Add head section if we have head IP
-        if [ -f ansible/head_ip.txt ] && [ -s ansible/head_ip.txt ]; then
-          echo "[head]" >> ansible/inventory.ini
-          cat ansible/head_ip.txt >> ansible/inventory.ini
-          HEAD_IP=$(cat ansible/head_ip.txt)
-          echo "Head node: $HEAD_IP"
-        else
-          echo "[head]" >> ansible/inventory.ini
-          echo "# No head node IP found" >> ansible/inventory.ini
-        fi
-        
+        echo "Head IP: $(cat ../ansible/head_ip.txt)"
+        echo "Com1 IP: $(cat ../ansible/com1_ip.txt)"
+        echo "Com2 IP: $(cat ../ansible/com2_ip.txt)"
+
+    - name: Create inventory
+      run: |
+        echo "[head]" > ansible/inventory.ini
+        cat ansible/head_ip.txt >> ansible/inventory.ini
         echo "" >> ansible/inventory.ini
-        
-        # Add compute nodes section
         echo "[compute_nodes]" >> ansible/inventory.ini
-        NODE_COUNT=0
-        
-        if [ -f ansible/com1_ip.txt ] && [ -s ansible/com1_ip.txt ]; then
-          cat ansible/com1_ip.txt >> ansible/inventory.ini
-          NODE_COUNT=$((NODE_COUNT + 1))
-        fi
-        
-        if [ -f ansible/com2_ip.txt ] && [ -s ansible/com2_ip.txt ]; then
-          cat ansible/com2_ip.txt >> ansible/inventory.ini
-          NODE_COUNT=$((NODE_COUNT + 1))
-        fi
-        
-        # If no specific compute nodes, try all_ips
-        if [ $NODE_COUNT -eq 0 ] && [ -f ansible/all_ips.txt ] && [ -s ansible/all_ips.txt ]; then
-          # Skip the first IP (head) and use the rest as compute nodes
-          tail -n +2 ansible/all_ips.txt >> ansible/inventory.ini
-          NODE_COUNT=$((NODE_COUNT + $(tail -n +2 ansible/all_ips.txt | wc -l)))
-        fi
-        
-        if [ $NODE_COUNT -eq 0 ]; then
-          echo "# No compute nodes found" >> ansible/inventory.ini
-        fi
-        
+        cat ansible/com1_ip.txt >> ansible/inventory.ini
+        cat ansible/com2_ip.txt >> ansible/inventory.ini
         echo "" >> ansible/inventory.ini
         echo "[all:vars]" >> ansible/inventory.ini
         echo "ansible_user=root" >> ansible/inventory.ini
         echo "ansible_ssh_private_key_file=/tmp/ssh_key" >> ansible/inventory.ini
         echo "ansible_ssh_common_args='-o StrictHostKeyChecking=no'" >> ansible/inventory.ini
 
-    - name: Debug information
-      run: |
-        echo "=== Debug Information ==="
-        echo "Current directory: $(pwd)"
-        echo "=== Terraform Files ==="
-        ls -la terraform/
-        echo "=== Ansible IP Files ==="
-        ls -la ansible/*.txt 2>/dev/null || echo "No IP files found"
-        echo "=== Inventory Contents ==="
-        cat ansible/inventory.ini
-        echo "=== Terraform State List ==="
-        cd terraform && terraform state list 2>/dev/null || echo "No state available" && cd ..
-
-    - name: Run Ansible playbooks if we have nodes
+    - name: Run Ansible playbooks
       run: |
         cd ansible
-        
-        # Check if we have any actual IP addresses in inventory
-        if grep -q -E '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' inventory.ini; then
-          echo "Found nodes in inventory, running playbooks..."
-          
-          # Test SSH connection first
-          ansible -i inventory.ini all -m ping
-          
-          # Run playbooks
-          ansible-playbook -i inventory.ini playbook-com2.yml
-          ansible-playbook -i inventory.ini fix-nfs-mount.yml
-          ansible-playbook -i inventory.ini fix-final.yml
-          
-          # Run verification
-          chmod +x ci-verification.sh
-          ./ci-verification.sh
-        else
-          echo "No nodes found in inventory, skipping Ansible playbooks"
-          echo "This usually means Terraform didn't create any droplets or IP extraction failed"
-          exit 1
-        fi
+        ansible-playbook -i inventory.ini playbook-com2.yml
+        ansible-playbook -i inventory.ini fix-nfs-mount.yml
+        ansible-playbook -i inventory.ini fix-final.yml
+        chmod +x ci-verification.sh
+        ./ci-verification.sh
